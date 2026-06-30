@@ -107,19 +107,22 @@ COMMUNITY_LICENSE_API=https://license.argyros.xyz
 
 ## API
 
-Once running, the engine exposes a REST API:
+### Endpoints
 
 ```
-GET  /health                  → {"status":"ok"}
-GET  /api/v1/quote            → best route + expected output
-POST /api/v1/swap             → ready-to-sign Solana transaction
-POST /api/v1/instructions     → raw swap instructions
-GET  /api/v1/pools/stats      → pool graph statistics
-GET  /api/v1/pools/list       → all indexed pools
-GET  /api/v1/pools/:address   → single pool
+GET  /health                   → {"status":"ok"}
+GET  /api/v1/quote             → best route + expected output
+POST /api/v1/swap              → ready-to-sign Solana transaction
+POST /api/v1/instructions      → raw swap instructions
+GET  /api/v1/price/:mint       → spot USD price for a single token
+GET  /api/v1/price?mints=...   → spot USD prices for up to 100 tokens (batch)
+GET  /api/v1/pools/stats       → pool graph statistics
+GET  /api/v1/pools/list        → all indexed pools
+GET  /api/v1/pools/:address    → single pool
+WS   /api/v1/stream            → real-time quote stream (WebSocket)
 ```
 
-### Quote example
+### Quote
 
 ```bash
 curl "http://localhost:8080/api/v1/quote?\
@@ -129,7 +132,7 @@ amount=1000000000&\
 slippageBps=50"
 ```
 
-### Swap example
+### Swap
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/swap \
@@ -139,6 +142,68 @@ curl -X POST http://localhost:8080/api/v1/swap \
     "userPublicKey": "YourBase58WalletAddress"
   }'
 ```
+
+### Price API
+
+Get the live spot USD price for any token derived from real-time pool state:
+
+```bash
+# Single token
+curl http://localhost:8080/api/v1/price/So11111111111111111111111111111111111111112
+# → {"mint":"So1...","price":185.42,"slot":12345678,"updatedAt":1719000000}
+
+# Batch (up to 100 mints, comma-separated)
+curl "http://localhost:8080/api/v1/price?mints=So1...,EPjF..."
+# → {"prices":[{"mint":"So1...","price":185.42,...},{"mint":"EPjF...","price":1.00,...}]}
+```
+
+`price` is `0` when no price is available yet (pool not yet seeded or decimals unknown). `updatedAt` is a Unix timestamp in seconds.
+
+### WebSocket stream
+
+Subscribe to real-time quote updates over WebSocket at `ws://localhost:8080/api/v1/stream`.  
+The engine re-runs the quote whenever relevant pool state changes on-chain and pushes the result immediately.
+
+**Subscribe:**
+```json
+{
+  "op": "subscribe",
+  "pairs": [
+    {
+      "in":     "So11111111111111111111111111111111111111112",
+      "out":    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "amount": "1000000000",
+      "exactIn": true
+    }
+  ]
+}
+```
+
+**Server acknowledges:**
+```json
+{"type":"subscribed","count":1}
+```
+
+**Server pushes quote updates:**
+```json
+{
+  "type":           "quote",
+  "in":             "So111...",
+  "out":            "EPjF...",
+  "amount":         "1000000000",
+  "amountOut":      "185420000",
+  "priceImpactBps": 3,
+  "hops":           1,
+  "slot":           12345678
+}
+```
+
+**Unsubscribe:**
+```json
+{"op":"unsubscribe","pairs":[{"in":"So1...","out":"EPjF...","amount":"1000000000","exactIn":true}]}
+```
+
+A single connection supports multiple subscribed pairs. Quotes are pushed only when the output amount changes.
 
 ---
 
